@@ -1,66 +1,142 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import styles from './page.module.scss';
+
+type Feed = { id: number; title: string };
+type Entry = {
+  id: number;
+  title: string;
+  url: string;
+  content: string;
+  status: 'read' | 'unread';
+  starred?: boolean; // may exist depending on API payload
+  feed?: { title: string };
+  published_at?: string;
+};
 
 export default function Home() {
+  const [feeds, setFeeds] = useState<Feed[]>([]);
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  const selected = useMemo(
+    () => entries.find((e) => e.id === selectedId) ?? null,
+    [entries, selectedId]
+  );
+
+  async function loadFeeds() {
+    const res = await fetch('/api/feeds');
+    setFeeds(await res.json());
+  }
+
+  async function loadEntries() {
+    const res = await fetch(
+      '/api/entries?status=unread&limit=50&direction=desc&order=published_at'
+    );
+    const data = await res.json();
+    // Miniflux returns {total, entries}
+    setEntries(data.entries ?? []);
+    if (!selectedId && (data.entries?.[0]?.id ?? null))
+      setSelectedId(data.entries[0].id);
+  }
+
+  async function markStatus(ids: number[], status: 'read' | 'unread') {
+    await fetch('/api/entries/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entry_ids: ids, status }),
+    });
+    await loadEntries();
+  }
+
+  async function toggleBookmark(id: number) {
+    await fetch(`/api/entries/${id}/bookmark`, { method: 'POST' });
+    await loadEntries();
+  }
+
+  useEffect(() => {
+    loadFeeds();
+    loadEntries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className={styles.shell}>
+      <aside className={styles.sidebar}>
+        <div className={styles.brand}>
+          <div className={styles.title}>Peace RSS</div>
+          <a
+            className={styles.miniLink}
+            href="/miniflux"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open Miniflux
+          </a>
         </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className={styles.sectionTitle}>Feeds</div>
+        <div className={styles.feedList}>
+          {feeds.map((f) => (
+            <div key={f.id} className={styles.feedItem} title={f.title}>
+              {f.title}
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <main className={styles.listPane}>
+        <div className={styles.toolbar}>
+          <button onClick={() => loadEntries()}>Refresh</button>
+          {selectedId && (
+            <>
+              <button onClick={() => markStatus([selectedId], 'read')}>
+                Mark read
+              </button>
+              <button onClick={() => toggleBookmark(selectedId)}>
+                Star/Unstar
+              </button>
+            </>
+          )}
+        </div>
+
+        <div className={styles.entryList}>
+          {entries.map((e) => (
+            <button
+              key={e.id}
+              className={`${styles.entryRow} ${
+                e.id === selectedId ? styles.active : ''
+              }`}
+              onClick={() => setSelectedId(e.id)}
+            >
+              <div className={styles.entryTitle}>{e.title}</div>
+              <div className={styles.entryMeta}>{e.feed?.title ?? ''}</div>
+            </button>
+          ))}
         </div>
       </main>
+
+      <section className={styles.detailPane}>
+        {selected ? (
+          <>
+            <div className={styles.detailHeader}>
+              <h1 className={styles.detailTitle}>{selected.title}</h1>
+              <div className={styles.detailActions}>
+                <a href={selected.url} target="_blank" rel="noreferrer">
+                  Open source
+                </a>
+              </div>
+            </div>
+            <article
+              className={styles.detailBody}
+              dangerouslySetInnerHTML={{ __html: selected.content ?? '' }}
+            />
+          </>
+        ) : (
+          <div className={styles.placeholder}>Select an entry</div>
+        )}
+      </section>
     </div>
   );
 }
